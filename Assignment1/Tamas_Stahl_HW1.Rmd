@@ -1,0 +1,76 @@
+---
+title: "Coding 2_Home Assignment 1"
+author: "Tamas Stahl"
+date: "23/11/2020"
+output:   
+  prettydoc::html_pretty:
+    theme: cayman
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(data.table)
+library(rvest)
+library(moments)
+```
+
+## Assignment
+
+Downloading data using web scraping from https://www.ft.com/
+
+## Function to download one page from the website
+
+```{r }
+my_url <- 'https://www.ft.com/search?&q=big+data'
+
+get_one_page_from_ft <- function(my_url) {
+  
+  print(my_url)
+  t <- read_html(my_url)
+  boxes <- t %>% 
+    html_nodes('.js-teaser')
+  x <- boxes[[1]]
+  boxes_df <- lapply(boxes, function(x){
+    t_list <- list()
+    t_list[['title']] <- x %>% html_nodes('.o-teaser__heading') %>% html_text()
+    t_list[['link']] <- paste0('https://www.ft.com', x %>% html_nodes('.js-teaser-heading-link') %>% html_attr('href'))
+    t_list[['teaser']] <-  gsub('\t', '', gsub('\n', '', x %>% html_nodes('.js-teaser-standfirst-link') %>% html_text(), fixed = TRUE), fixed = TRUE)
+    return(data.frame(t_list))  
+  })
+  df_one_page <- rbindlist(boxes_df)
+  return(df_one_page)
+}
+
+df <- get_one_page_from_ft(my_url)
+
+write.csv(df, 'FT_one_page.csv')
+saveRDS(df, 'FT_one_page.rds')
+
+knitr::kable(df)
+```
+
+## Function using two arguments, keyword and number of pages to be downloaded
+
+```{r }
+#search term <- 'big data'
+#page_to_download <- 3 
+get_ft <- function(searchterm, page_to_download) {
+  
+  searchterm <- gsub(' ', '+', searchterm, fixed = T)
+  # create links
+  links_to_get <- 
+    paste0('https://www.ft.com/search?q=', searchterm, '&page=', seq(1, (page_to_download)))
+  ret_df <- rbindlist(lapply(links_to_get, get_one_page_from_ft))
+  return(ret_df)
+  
+}
+
+# The resulting dataframe of getting one page from ft.com
+df_arguments <- get_ft(searchterm = 'big data', 3)
+# Writing out to CSV and RDS
+write.csv(df_arguments, 'FT_arguments.csv')
+saveRDS(df_arguments, 'FT_arguments.rds')
+
+knitr::kable(df_arguments)
+```
