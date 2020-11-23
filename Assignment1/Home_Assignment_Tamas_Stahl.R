@@ -25,7 +25,7 @@ get_one_page_from_ft <- function(my_url) {
   return(df)
 }
 
-# The resulting dataframe of getting one page from ft.com
+# The resulting data frame of getting one page from ft.com
 df <- get_one_page_from_ft(my_url)
 # Writing out to CSV and RDS
 write.csv(df, 'FT_one_page.csv')
@@ -49,7 +49,7 @@ get_ft <- function(searchterm, page_to_download) {
 }
 
 
-# The resulting data frame of getting one page from ft.com
+# The resulting data frame of getting data frame from ft.com using two arguments
 df_arguments <- get_ft(searchterm = 'big data', 3)
 # Writing out to CSV and RDS
 write.csv(df_arguments, 'FT_arguments.csv')
