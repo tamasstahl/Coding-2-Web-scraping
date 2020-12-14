@@ -1,0 +1,240 @@
+---
+title: "Final Project - Webscraping"
+author: "Tamas Stahl"
+date: "14/12/2020"
+output:   
+  prettydoc::html_pretty:
+    theme: cayman
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(rvest)
+library(lubridate)
+library(dplyr)
+library(moments)
+library(ggplot2)
+library(ggpubr)
+```
+
+## Basketball Reference
+
+My task for the webscraping course's final assignment was to scrape a website which I was interested in and then prepare a small analysis.
+
+I intended to have a look into the abnormal 2019-2020 season of the NBA as the major league sports like the NBA, NFL, NHL and MLB are the heaven for data and sport enthusiasts. I got the data for each month of the 2019-2020 season with the help of a function in R from the website of the basketball-reference.
+
+2020 was a really strange year due to the pandemic, which affected the 2019-2020 NBA season as well. We could detect several anomalies in 2020. Usually the NBA season shoud be over by the summer. This year the final was held in October. It was the first time that basketball players played on October in two distinct years but in the same season.
+
+In order to get the whole data for the year we had to include october like october-2019 and october-2020 in order to get the data correctly. Other item to note is that there was a break during the year due to the pandemic, therefore, there is no data between april and june.
+
+As for the webscraping part. If you would like to check out different years just please change the parameters year and months and it would be easy to get the data.
+
+
+```{r cars}
+# Parameters (year and months could be changed in scraping)
+year <- "2020"
+months <- c("october-2019", "november", "december", "january","february", "march", "july", "august", "september", "october-2020")
+playoffs <- ymd("2020-08-17")
+outputfile <- "NBA-2020_game_data.rds"
+```
+
+## Webscraping
+
+Below is the function to get the data from the website https://www.basketball-reference.com/leagues/NBA_2020_games.html. This function realizes the year and months, as mentioned above the with the changing of parameters the function will get different data. With this function we could get all the games played and scores in the 2019-2020 NBA season.
+
+In the function a cleaning process was already performed as a divider row between the regular season and playoffs messed up the data table.
+
+```{r}
+df <- data.frame()
+for (month in months) {
+  # Website
+  url <- paste0("https://www.basketball-reference.com/leagues/NBA_", year, 
+                "_games-", month, ".html")
+  nba <- read_html(url)
+
+  # Getting the column names
+  col_names <- nba %>% 
+    html_nodes("table#schedule > thead > tr > th") %>% 
+    html_attr("data-stat")    
+  col_names <- c("game_id", col_names)
+  
+  # The Playoffs section divider messes up our table so we will remove that from the dates
+  dates <- nba %>% 
+    html_nodes("table#schedule > tbody > tr > th") %>% 
+    html_text()
+  dates <- dates[dates != "Playoffs"]
+  
+  # Again, the Playoffs divider needs to be removed from the game ID, more precisely the NA value that is given
+  game_id <- nba %>% 
+    html_nodes("table#schedule > tbody > tr > th") %>%
+    html_attr("csk")
+  game_id <- game_id[!is.na(game_id)]
+  
+  # Getting all the columns except the date
+  data <- nba %>% 
+    html_nodes("table#schedule > tbody > tr > td") %>% 
+    html_text() %>%
+    matrix(ncol = length(col_names) - 2, byrow = TRUE)
+  
+  # Combining the above extracted data
+  month_df <- as.data.frame(cbind(game_id, dates, data), stringsAsFactors = FALSE)
+  names(month_df) <- col_names
+  
+  # Fina dataframe
+  df <- rbind(df, month_df)
+}
+```
+
+## Data cleaning
+
+During the cleaning process first I changed to the correct type of columns the ones incorrect (Made numeric columns). Furthermore, I dropped the unwanted columns and changed the NA values of the attendance to 0. This attendance modification was important, as after the breakout of the pandemic the whole league went behind locked doors, therefore, the number of attendants were zero not NA. 
+
+``` {r}
+## Data Cleaning
+# Correct values for the certain columns are changed
+df$date_game   <- mdy(df$date_game)
+df$home_pts    <- as.numeric(df$home_pts)
+df$visitor_pts <- as.numeric(df$visitor_pts)
+df$attendance  <- as.numeric(gsub(",", "", df$attendance))
+
+# Dropping the useless data
+df$box_score_text <- NULL
+df$game_remarks <- NULL
+
+# Dropping the NA values (in attendance)
+# Due to the pandemic there were lot of games with zero attendance in person (the whole playoffs was behind closed doors)
+df[is.na(df)] <- 0
+```
+
+## Data Enrichment
+
+In order to perform meaningful analysis from the data that I got, some data enrichment was necessary. First of all, we would like to know which game was a regular season game and which one was a playoff game. The playoffs are a more exclusive part of the season with less teams participating. The team to win 4 times 4 games in 4 series will be crowned the champion of the season.
+
+Secondly, from the home points and away points I could create to columns which showed us the point difference between the teams from the home and the visitors side as well.
+
+Lastly, two other columns were appended, which consisted the name of the winners and the losers of each game.
+
+``` {r}
+## Data Enrichment
+# Adding a new column for categorizing a game for Regular Season or Playoffs
+df$game_type <- with(df, ifelse(date_game >= playoffs, 
+                                "Playoff", "Regular Season"))
+
+# Getting the difference score from the view of the home and visitor team sa well
+df <- df %>% mutate(home_game_diff = home_pts - visitor_pts)
+df <- df %>% mutate(away_game_diff = visitor_pts - home_pts)
+
+# Getting both the winner and loser team for each game
+df$winner <- with(df, ifelse(visitor_pts > home_pts, 
+                             visitor_team_name, home_team_name))
+df$loser <- with(df, ifelse(visitor_pts < home_pts, 
+                            visitor_team_name, home_team_name))
+```
+
+Here is the code snippet for saving the data into an rds object and a csv after it was cleaned and enriched.
+
+```{r}
+# save to file
+saveRDS(df, outputfile)
+write.csv(df, "clean_data.csv")
+```
+
+## Analysis
+
+In the analysis part I created several subsets to analyze. 
+
+The first figure shows us the performance of 3 teams in the regular season and playoffs through the point difference when playing at home and when away from home. The 3 teams were the Los Angeles Lakers (LAL), Boston Celtics (BOS) and the Golden State Warriors (GSW). From the figure we can see a large gap between several points, which was due to the pandemic break. However, GSW did not have such a break as the did not qualify for the playoffs. The dots over the line means that the team won, subsequently the dots below mean losses. It is easy to see why GSW did not qualify for the playoffs.
+
+``` {r, message=FALSE, echo=FALSE, warning=FALSE}
+#Creating subset for Los Angeles Lakers home games
+s1 <- subset(df,home_team_name %in% c("Los Angeles Lakers"))
+#Creating subset for Los Angeles Lakers away games
+s2 <- subset(df,visitor_team_name %in% c("Los Angeles Lakers"))
+
+# Checking on a line chart how did Los Angeles Lakers fared on home court and away
+lal <- ggplot()+
+  geom_point(data = s1, aes(x = date_game, y = home_game_diff), color = "blue", size = 2)+
+  geom_point(data = s2, aes(x = date_game, y = away_game_diff), color = "red", size = 2)+
+  geom_hline(yintercept = 0, size = 1)+
+  ylim(-45, 35) +
+  xlab('Dates') +
+  ylab('Score difference')+
+  ggtitle('LAL performance')
+
+
+#Creating subset for Boston Celtics home games
+s3 <- subset(df,home_team_name %in% c("Boston Celtics"))
+#Creating subset for Boston Celtics Lakers away games
+s4 <- subset(df,visitor_team_name %in% c("Boston Celtics"))
+
+
+# Checking on a line chart how did Boston Celtics fared on home court and away
+bos <- ggplot()+
+  geom_point(data = s3, aes(x = date_game, y = home_game_diff), color = "blue", size = 2)+
+  geom_point(data = s4, aes(x = date_game, y = away_game_diff), color = "red", size = 2)+
+  geom_hline(yintercept = 0, size = 1)+
+  ylim(-45, 35) +
+  xlab('Dates') +
+  ylab('Score difference')+
+  ggtitle('BOS performance')
+  
+#Creating subset for Golden State Warriors home games
+s5 <- subset(df,home_team_name %in% c("Golden State Warriors"))
+#Creating subset for Golden State Warriors away games
+s6 <- subset(df,visitor_team_name %in% c("Golden State Warriors"))
+
+# Checking on a line chart how did Golden State Warriors fared on home court and away
+gsw <- ggplot()+
+  geom_point(data = s5, aes(x = date_game, y = home_game_diff), color = "blue", size = 2)+
+  geom_point(data = s6, aes(x = date_game, y = away_game_diff), color = "red", size = 2)+
+  geom_hline(yintercept = 0, size = 1)+
+  ylim(-45, 35) +
+  xlab('Dates') +
+  ylab('Score difference')+
+  ggtitle('GSW performance')
+
+ggarrange(lal, bos, gsw, ncol = 3, nrow = 1)
+```
+
+For the next two charts I created a subset to include only the playoff games. This line chart shows us the the score differences in the playoffs from a home team point of view. We could see that on the same day several games took place. Therefore, I included the points as well, to see the games clearer. 
+
+It is interesting to see that home court did not matter this year as much as it might have mattered in the previous years. However, it was due to the fact that they did not play at their arenas and there were no fans to cheer. All the games were played in a "bubble sport center" in Orlando.
+
+``` {r, message=FALSE, echo=FALSE, warning=FALSE}
+# Creating a subset of playoffs
+playoffs <- subset(df,game_type %in% c("Playoff"))
+
+# Plotting the score differences over time
+ggplot()+
+  geom_line(data = playoffs, aes(x = date_game, y = home_game_diff), color = "blue")+
+  geom_point(data = playoffs, aes(x = date_game, y = home_game_diff), color = "blue")+
+  geom_hline(yintercept = 0)+
+  xlab('Dates') +
+  ylab('Score difference')+
+  ggtitle('Score difference in the playoffs (home court view)')
+```
+
+This bar chart shows us that how many games each playoff participating team won. To win the championship you need 16 won games. 
+
+``` {r, message=FALSE, echo=FALSE, warning=FALSE}
+# Number of games won in playoffs 2019-2020
+ggplot(playoffs, aes(winner))+
+  geom_bar()+
+  theme(axis.text.x = element_text(angle = 90))+
+  xlab('Teams') +
+  ylab('Number of games won')+
+  ggtitle('Number of games won in playoffs 2019-2020')
+```
+
+For this chart another subset was created, which included the regular season games. I was curious how attendance is ranging in the NBA. DUe to the pandemic,first there was a break then 0 attendees. Other than that, we could conclude that the range is significant as some arenas are smaller than the others.
+
+``` {r, message=FALSE, echo=FALSE, warning=FALSE}
+# Change of attendance in the regular season
+regular_season <- subset(df,game_type %in% c("Regular Season"))
+ggplot()+
+  geom_point(data = regular_season, aes(x = date_game, y = attendance))+
+  xlab('Dates') +
+  ylab('Attendance')+
+  ggtitle('Attendance in the regular season 2019-2020')
+```
